@@ -1,0 +1,201 @@
+
+import processing.serial.*;
+
+Serial porta;
+String rawLine;
+int distRaw = 0;          
+float distDisplay = 0;    
+float ang = 0;           
+boolean sweepForward = true;
+
+PFont font;
+
+
+String FORCE_PORT = null; 
+
+void setup() {
+  size(900, 600);
+  smooth();
+  font = createFont("Arial", 18);
+  textFont(font);
+  println("Portas seriais detectadas:");
+  println(Serial.list());
+
+  String portName = null;
+  if (FORCE_PORT != null) {
+    portName = FORCE_PORT;
+    println("Usando porta forçada: " + portName);
+  } else {
+    String[] ports = Serial.list();
+    if (ports.length == 0) {
+      println("Nenhuma porta serial detectada. Conecte o Arduino e reinicie o sketch.");
+      noLoop();
+      return;
+    } else {
+      
+      portName = ports[ports.length - 1];
+      println("Selecionando automaticamente a porta: " + portName);
+    }
+  }
+
+  try {
+    porta = new Serial(this, portName, 9600);
+    porta.bufferUntil('\n');
+    println("Porta aberta: " + portName + " @9600");
+  } catch (Exception e) {
+    println("Erro abrindo porta serial: " + e.getMessage());
+    println("Verifique se a porta está correta e feche o Serial Monitor da IDE do Arduino.");
+    noLoop();
+    return;
+  }
+}
+
+void draw() {
+  
+  fill(0, 35);
+  noStroke();
+  rect(0, 0, width, height);
+
+  
+  if (sweepForward) ang += 1.8;
+  else ang -= 1.8;
+  if (ang > 180) { ang = 180; sweepForward = false; }
+  if (ang < 0)   { ang = 0;   sweepForward = true;  }
+
+  drawRadar();
+  drawBeam(ang);
+  drawObject();      
+  drawHUD();
+}
+
+
+void serialEvent(Serial s) {
+  rawLine = s.readStringUntil('\n');
+  if (rawLine == null) return;
+  rawLine = trim(rawLine);
+  if (rawLine.length() == 0) return;
+
+
+  String cleaned = rawLine.replaceAll("[^0-9\\-]", "");
+  if (cleaned.length() == 0) {
+    
+    return;
+  }
+
+  try {
+    distRaw = Integer.parseInt(cleaned);
+  } catch (Exception e) {
+    
+    println("Nao foi possivel parsear '" + cleaned + "'");
+    distRaw = 0;
+  }
+
+ 
+  float smoothFactor = 0.15;
+  distDisplay = lerp(distDisplay, distRaw, smoothFactor);
+}
+
+
+void drawRadar() {
+  pushMatrix();
+  translate(width/2, height - 60);
+  noFill();
+  stroke(0, 200, 0);
+  strokeWeight(2);
+
+ 
+  for (int r = 100; r <= 420; r += 70) {
+    stroke(0, 140, 0, 150);
+    arc(0, 0, r*2, r*2, PI, TWO_PI);
+  }
+
+  
+  stroke(0, 200, 0, 200);
+  for (int a = 0; a <= 180; a += 30) {
+    line(0, 0, 420 * cos(radians(a)), -420 * sin(radians(a)));
+  }
+
+  popMatrix();
+}
+
+void drawBeam(float angle) {
+  pushMatrix();
+  translate(width/2, height - 60);
+  stroke(0, 255, 0, 140);
+  strokeWeight(3);
+
+  line(0, 0, 420 * cos(radians(angle)), -420 * sin(radians(angle)));
+  
+  noStroke();
+  fill(0, 255, 0, 20);
+  beginShape();
+    vertex(0,0);
+    float a0 = radians(angle-1.8);
+    float a1 = radians(angle+1.8);
+    vertex(420 * cos(a0), -420 * sin(a0));
+    vertex(420 * cos(a1), -420 * sin(a1));
+  endShape(CLOSE);
+
+  popMatrix();
+}
+
+
+void drawObject() {
+  pushMatrix();
+  translate(width/2, height - 60);
+
+ 
+  float maxDetect = 40.0;
+  float maxPixel = 400.0;
+  float d = constrain(distDisplay, 0, maxDetect);
+  float pix = map(d, 0, maxDetect, 0, maxPixel);
+
+  int r = (int)map(d, 0, maxDetect, 255, 0);
+  int g = (int)map(d, 0, maxDetect, 0, 255);
+  int b = 0;
+  float alpha = (d > 0 && d < maxDetect) ? 255 : 60;
+
+  if (d > 0 && d < maxDetect) {
+    noStroke();
+    fill(r, g, b, alpha);
+    
+    float x = 0;
+    float y = -pix;
+    ellipse(x, y, 14, 14);
+
+    
+    noFill();
+    stroke(r, g, b, 80);
+    strokeWeight(2);
+    float halo = 18 + map(d, 0, maxDetect, -10, 40);
+    ellipse(x, y, halo, halo);
+  } else {
+   
+    noStroke();
+    fill(0, 100, 0, 80);
+    ellipse(0, -maxPixel, 6, 6);
+  }
+
+  popMatrix();
+}
+
+void drawHUD() {
+  fill(0, 120);
+  noStroke();
+  rect(0, height - 36, width, 36);
+
+  fill(0, 255, 0);
+  textAlign(LEFT, CENTER);
+  text("Dist (raw): " + distRaw + " cm", 12, height - 18);
+  text("Dist (suave): " + nf(distDisplay,1,1) + " cm", 180, height - 18);
+  textAlign(RIGHT, CENTER);
+  text("Ângulo (sim): " + int(ang) + "°", width - 12, height - 18);
+}
+
+void stop() {
+  if (porta != null) {
+    porta.stop();
+    println("Porta serial fechada.");
+  }
+  super.stop();
+}
